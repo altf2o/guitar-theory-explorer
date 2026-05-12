@@ -1,0 +1,5 @@
+{
+  "name": "Guitar Theory Explorer",
+  "description": "A web-based application for guitar theory learning and practice, featuring interactive scales and chord diagrams.",
+  "requestFramePermissions": []
+}

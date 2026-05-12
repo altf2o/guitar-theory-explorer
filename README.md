@@ -1,2 +1,12 @@
-# guitar-theory-explorer
-An app I used AI to help create, for at a glance learning/practice of guitar theory
+# Guitar Theory Explorer
+
+## Run Locally
+
+**Prerequisites:**  Node.js
+
+1. Install dependencies:
+   `npm install`
+2. Run the app:
+   `npm run dev`
+
+==**WARNING:**==
