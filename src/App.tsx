@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
+import { Github } from 'lucide-react';
 
 const KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 
@@ -395,7 +396,15 @@ export default function App() {
   const displayKey = scaleNotes[0];
 
   return (
-    <div className="min-h-screen bg-neutral-50 text-neutral-900 p-4 sm:p-8 font-sans">
+    <div className="min-h-screen bg-neutral-50 text-neutral-900 p-4 sm:p-8 font-sans relative">
+      <a 
+        href="https://github.com/altf2o/guitar-theory-explorer" 
+        target="_blank" 
+        rel="noopener noreferrer" 
+        className="absolute top-4 right-4 sm:top-8 sm:right-8 p-2 text-neutral-400 hover:text-neutral-900 transition-colors"
+      >
+        <Github size={24} />
+      </a>
       <div className="max-w-5xl mx-auto space-y-8">
         <header className="text-center space-y-2 pt-4">
           <h1 className="text-3xl font-semibold tracking-tight">Guitar Theory Explorer</h1>
