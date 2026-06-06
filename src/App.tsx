@@ -50,6 +50,12 @@ function getRomanNumeral(degreeIndex: number, quality: string) {
   return base;
 }
 
+function getOrdinal(n: number) {
+  if (n === 0) return 'Open';
+  const s = ["th", "st", "nd", "rd"], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 const chordVoicings: Record<string, number[][]> = {
   'C Major': [[-1, 3, 2, 0, 1, 0], [-1, 3, 5, 5, 5, 3], [8, 10, 10, 9, 8, 8]],
   'C minor': [[-1, 3, 5, 5, 4, 3], [8, 10, 10, 8, 8, 8]],
@@ -168,7 +174,7 @@ function getModeNotes(root: string, shift: number) {
 
 const genericNotes = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
 
-const ChordDiagram = ({ name, frets, scaleNotes }: { name: string, frets: number[], scaleNotes?: string[] }) => {
+const ChordDiagram = ({ name, frets, scaleNotes, rootNote }: { name: string, frets: number[], scaleNotes?: string[], rootNote?: string }) => {
   const validFrets = frets.filter(f => f > 0);
   const minFret = validFrets.length > 0 ? Math.min(...validFrets) : 0;
   const maxFret = validFrets.length > 0 ? Math.max(...validFrets) : 0;
@@ -185,9 +191,11 @@ const ChordDiagram = ({ name, frets, scaleNotes }: { name: string, frets: number
   const startY = 25;
   const width = startX * 2 + stringSpacing * 5;
   const height = startY + fretSpacing * 4 + 25;
+  
+  const rootVal = rootNote ? noteValues[rootNote] : undefined;
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="font-sans text-neutral-800">
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="font-sans text-slate-800">
       {/* Fret Number */}
       {baseFret > 1 && (
         <text x={startX - 18} y={startY + fretSpacing / 2 + 4} fontSize="12" fill="currentColor" className="font-medium">{baseFret}</text>
@@ -229,16 +237,20 @@ const ChordDiagram = ({ name, frets, scaleNotes }: { name: string, frets: number
         const x = startX + i * stringSpacing;
         if (fret === -1) {
           return (
-            <text key={`marker-${i}`} x={x} y={startY - 8} fontSize="12" textAnchor="middle" fill="currentColor" className="font-medium">X</text>
+            <text key={`marker-${i}`} x={x} y={startY - 8} fontSize="12" textAnchor="middle" fill="#94a3b8" className="font-medium">X</text>
           );
         } else if (fret === 0) {
+          const val = (stringOrder[i] + fret) % 12;
+          const isRoot = val === rootVal;
           return (
-            <circle key={`marker-${i}`} cx={x} cy={startY - 10} r="3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            <circle key={`marker-${i}`} cx={x} cy={startY - 10} r="3.5" fill="none" stroke={isRoot ? "#3b82f6" : "#475569"} strokeWidth="2" />
           );
         } else {
+          const val = (stringOrder[i] + fret) % 12;
+          const isRoot = val === rootVal;
           const y = startY + (fret - baseFret) * fretSpacing + fretSpacing / 2;
           return (
-            <circle key={`marker-${i}`} cx={x} cy={y} r="5" fill="currentColor" />
+            <circle key={`marker-${i}`} cx={x} cy={y} r="5" fill={isRoot ? "#3b82f6" : "#475569"} />
           );
         }
       })}
@@ -250,7 +262,7 @@ const ChordDiagram = ({ name, frets, scaleNotes }: { name: string, frets: number
           let noteName = scaleNotes?.find(n => noteValues[n] === val);
           if (!noteName) noteName = genericNotes[val];
           return (
-             <text key={`notename-${i}`} x={startX + i * stringSpacing} y={startY + 4 * fretSpacing + 18} fontSize="10" textAnchor="middle" fill="currentColor" className="font-medium">
+             <text key={`notename-${i}`} x={startX + i * stringSpacing} y={startY + 4 * fretSpacing + 18} fontSize="10" textAnchor="middle" fill="#64748b" className="font-medium">
               {noteName}
             </text>
           );
@@ -261,7 +273,160 @@ const ChordDiagram = ({ name, frets, scaleNotes }: { name: string, frets: number
   );
 };
 
-const ScaleDiagram: React.FC<{ title: string, scaleNotes: string[], rootNote: string, baseFret?: number, activePattern?: {sIdx: number, fIdx: number}[], fullFretboard?: boolean }> = ({ title, scaleNotes, rootNote, baseFret = 0, activePattern, fullFretboard }) => {
+const PentatonicDiagram: React.FC<{ title: string, scaleNotes: string[], selectedMode: number }> = ({ title, scaleNotes, selectedMode }) => {
+  const isMajor = [0, 3, 4].includes(selectedMode);
+  const rootVal = noteValues[scaleNotes[0]];
+  const minorRootVal = isMajor ? (rootVal - 3 + 12) % 12 : rootVal;
+  const R = (minorRootVal - 4 + 12) % 12;
+
+  const RELATIVE_PENTATONIC = [
+    [0, 3, 5, 7, 10], // High E
+    [0, 3, 5, 8, 10], // B
+    [0, 2, 4, 7, 9],  // G
+    [0, 2, 5, 7, 9],  // D
+    [0, 2, 5, 7, 10], // A
+    [0, 3, 5, 7, 10]  // Low E
+  ];
+  
+  const COLORS = ['#3b82f6', '#f97316', '#22c55e', '#9333ea', '#ef4444'];
+  
+  const fretOwnership: Record<string, number[]> = {};
+  const brackets: any[] = [];
+  const numFrets = 22;
+  
+  for (let octave = -1; octave <= 2; octave++) {
+    for (let c = 0; c < 5; c++) {
+      let min_f = 999;
+      let max_f = -999;
+      
+      const shapeNotes = [];
+      for (let s = 0; s < 6; s++) {
+        const f1 = RELATIVE_PENTATONIC[s][c] + R + octave * 12;
+        const f2 = RELATIVE_PENTATONIC[s][c === 4 ? 0 : c + 1] + (c === 4 ? 12 : 0) + R + octave * 12;
+        shapeNotes.push({s, f: f1}, {s, f: f2});
+      }
+      
+      shapeNotes.forEach(({s, f}) => {
+        if (f >= 0 && f <= numFrets) {
+          min_f = Math.min(min_f, f);
+          max_f = Math.max(max_f, f);
+          const key = `${s}_${f}`;
+          if (!fretOwnership[key]) fretOwnership[key] = [];
+          if (!fretOwnership[key].includes(c)) fretOwnership[key].push(c);
+        }
+      });
+      
+      if (min_f <= numFrets && max_f >= 0 && (max_f - min_f >= 2)) {
+        brackets.push({
+          c,
+          minFret: Math.max(0, min_f),
+          maxFret: Math.min(numFrets, max_f),
+          label: min_f === 0 ? "Open Position" : `${getOrdinal(min_f)} Position`,
+          color: COLORS[c]
+        });
+      }
+    }
+  }
+  
+  brackets.sort((a, b) => a.minFret - b.minFret);
+
+  const fretSpacing = 40;
+  const stringSpacing = 18;
+  const startX = 20;
+  const startY = 45; 
+  const width = startX * 2 + numFrets * fretSpacing;
+  const height = startY * 2 + 5 * stringSpacing + 25; 
+  const getX = (f: number) => f === 0 ? startX - 10 : startX + (f - 0.5) * fretSpacing;
+
+  return (
+    <div className="w-full bg-white rounded-2xl shadow-sm border border-slate-200 p-4 hover:shadow-md transition-shadow overflow-hidden flex flex-col items-start">
+      <div className="text-sm font-semibold mb-3 text-slate-700">{title}</div>
+      <div className="w-full overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="font-sans text-slate-800" style={{ minWidth: width }}>
+          {/* Fret Markers */}
+          {[3, 5, 7, 9, 15, 17, 19, 21].map(fret => (
+            <circle key={`marker-${fret}`} cx={getX(fret)} cy={startY + 2.5 * stringSpacing} r="5" fill="#cbd5e1" />
+          ))}
+          <circle cx={getX(12)} cy={startY + 1.5 * stringSpacing} r="5" fill="#cbd5e1" />
+          <circle cx={getX(12)} cy={startY + 3.5 * stringSpacing} r="5" fill="#cbd5e1" />
+
+          {/* Strings */}
+          {Array.from({ length: 6 }).map((_, i) => (
+            <line key={`string-${i}`} x1={startX} y1={startY + i * stringSpacing} x2={startX + numFrets * fretSpacing} y2={startY + i * stringSpacing} stroke="#94a3b8" strokeWidth={1 + (i * 0.2)} />
+          ))}
+
+          {/* Frets */}
+          {Array.from({ length: numFrets + 1 }).map((_, i) => (
+            <line key={`fret-${i}`} x1={startX + i * fretSpacing} y1={startY} x2={startX + i * fretSpacing} y2={startY + 5 * stringSpacing} stroke={i === 0 ? "#475569" : "#cbd5e1"} strokeWidth={i === 0 ? 4 : 2} />
+          ))}
+
+          {/* Fret Numbers At Bottom */}
+          {Array.from({ length: numFrets + 1 }).map((_, i) => (
+            <text key={`fret-num-${i}`} x={i === 0 ? startX - 10 : startX + (i - 0.5) * fretSpacing} y={startY + 5 * stringSpacing + 20} fontSize="10" fill="#64748b" textAnchor="middle">
+              {i}
+            </text>
+          ))}
+
+          {/* Brackets */}
+          {brackets.map((b, i) => {
+            const isTop = i % 2 !== 0; // Top
+            const x1 = getX(b.minFret) - 9;
+            const x2 = getX(b.maxFret) + 9;
+            const bracketY = isTop ? startY - 18 : startY + 5 * stringSpacing + 30;
+            const legLength = isTop ? 6 : -6;
+            const textY = isTop ? bracketY - 6 : bracketY + 6;
+            const alignment = isTop ? "auto" : "hanging";
+            
+            return (
+              <g key={`bracket-${i}`}>
+                <path d={`M ${x1} ${bracketY + legLength} L ${x1} ${bracketY} L ${x2} ${bracketY} L ${x2} ${bracketY + legLength}`} stroke={b.color} strokeWidth="2.5" fill="none" />
+                <text x={(x1+x2)/2} y={textY} fill={b.color} fontSize="11" fontWeight="bold" textAnchor="middle" dominantBaseline={alignment} className="uppercase tracking-wider">
+                  {b.label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Notes Backgrounds */}
+          {Object.entries(fretOwnership).map(([key, shapes]) => {
+            const [s, f] = key.split('_').map(Number);
+            const x = getX(f);
+            const y = startY + s * stringSpacing;
+            
+            if (shapes.length === 1) {
+              return <circle key={`c-${key}`} cx={x} cy={y} r="9" fill={COLORS[shapes[0]]} />;
+            } else if (shapes.length === 2) {
+              return (
+                <g key={`split-${key}`}>
+                  <path d={`M ${x} ${y-9} A 9 9 0 0 0 ${x} ${y+9} Z`} fill={COLORS[shapes[0]]} />
+                  <path d={`M ${x} ${y-9} A 9 9 0 0 1 ${x} ${y+9} Z`} fill={COLORS[shapes[1]]} />
+                </g>
+              );
+            }
+            return null;
+          })}
+
+          {/* Note Names */}
+          {Object.entries(fretOwnership).map(([key]) => {
+            const [s, f] = key.split('_').map(Number);
+            const x = getX(f);
+            const y = startY + s * stringSpacing;
+            const stVals = [4, 11, 7, 2, 9, 4];
+            const noteVal = (stVals[s] + f) % 12;
+            let noteName = scaleNotes.find(n => noteValues[n] === noteVal) || genericNotes[noteVal] || '';
+            return (
+                <text key={`t-${key}`} x={x} y={y + 1} fontSize="8" fontWeight="bold" fill="white" textAnchor="middle" dominantBaseline="central">
+                  {noteName}
+                </text>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+};
+
+const ScaleDiagram: React.FC<{ title: string, scaleNotes: string[], rootNote: string, baseFret?: number, activePattern?: {sIdx: number, fIdx: number}[], fullFretboard?: boolean, hideFretMarkers?: boolean, hideFaintNotes?: boolean }> = ({ title, scaleNotes, rootNote, baseFret = 0, activePattern, fullFretboard, hideFretMarkers, hideFaintNotes }) => {
   const scaleVals = scaleNotes.map(n => noteValues[n]);
   const rootVal = noteValues[rootNote];
   const stVals = [4, 11, 7, 2, 9, 4]; 
@@ -276,31 +441,31 @@ const ScaleDiagram: React.FC<{ title: string, scaleNotes: string[], rootNote: st
   const height = startY * 2 + 5 * stringSpacing + 10;
 
   return (
-    <div className="w-full bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 hover:shadow-md transition-shadow overflow-hidden flex flex-col items-start">
-      <div className="text-sm font-semibold mb-2 text-neutral-700">{title}</div>
-      <div className="w-full overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-neutral-200 scrollbar-track-transparent">
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="font-sans text-neutral-800" style={{ minWidth: width }}>
+    <div className="w-full bg-white rounded-2xl shadow-sm border border-slate-200 p-4 hover:shadow-md transition-shadow overflow-hidden flex flex-col items-start">
+      <div className="text-sm font-semibold mb-2 text-slate-700">{title}</div>
+      <div className="w-full overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="font-sans text-slate-800" style={{ minWidth: width }}>
           {/* Fret Markers */}
-          {[3, 5, 7, 9, 15, 17, 19, 21].map(fret => (
-            <circle key={`marker-${fret}`} cx={startX + (fret - 0.5) * fretSpacing} cy={startY + 2.5 * stringSpacing} r="5" fill="#e5e5e5" />
+          {!hideFretMarkers && [3, 5, 7, 9, 15, 17, 19, 21].map(fret => (
+            <circle key={`marker-${fret}`} cx={startX + (fret - 0.5) * fretSpacing} cy={startY + 2.5 * stringSpacing} r="5" fill="#cbd5e1" />
           ))}
           {/* 12th fret double marker */}
-          <circle cx={startX + 11.5 * fretSpacing} cy={startY + 1.5 * stringSpacing} r="5" fill="#e5e5e5" />
-          <circle cx={startX + 11.5 * fretSpacing} cy={startY + 3.5 * stringSpacing} r="5" fill="#e5e5e5" />
+          {!hideFretMarkers && <circle cx={startX + 11.5 * fretSpacing} cy={startY + 1.5 * stringSpacing} r="5" fill="#cbd5e1" />}
+          {!hideFretMarkers && <circle cx={startX + 11.5 * fretSpacing} cy={startY + 3.5 * stringSpacing} r="5" fill="#cbd5e1" />}
 
           {/* Strings */}
           {Array.from({ length: 6 }).map((_, i) => (
-            <line key={`string-${i}`} x1={startX} y1={startY + i * stringSpacing} x2={startX + numFrets * fretSpacing} y2={startY + i * stringSpacing} stroke="#d4d4d4" strokeWidth={1 + (i * 0.2)} />
+            <line key={`string-${i}`} x1={startX} y1={startY + i * stringSpacing} x2={startX + numFrets * fretSpacing} y2={startY + i * stringSpacing} stroke="#94a3b8" strokeWidth={1 + (i * 0.2)} />
           ))}
 
           {/* Frets */}
           {Array.from({ length: numFrets + 1 }).map((_, i) => (
-            <line key={`fret-${i}`} x1={startX + i * fretSpacing} y1={startY} x2={startX + i * fretSpacing} y2={startY + 5 * stringSpacing} stroke={i === 0 ? "#171717" : "#e5e5e5"} strokeWidth={i === 0 ? 4 : 2} />
+            <line key={`fret-${i}`} x1={startX + i * fretSpacing} y1={startY} x2={startX + i * fretSpacing} y2={startY + 5 * stringSpacing} stroke={i === 0 ? "#475569" : "#cbd5e1"} strokeWidth={i === 0 ? 4 : 2} />
           ))}
 
           {/* Fret Numbers At Bottom */}
           {Array.from({ length: numFrets + 1 }).map((_, i) => (
-            <text key={`fret-num-${i}`} x={i === 0 ? startX - 10 : startX + (i - 0.5) * fretSpacing} y={startY + 5 * stringSpacing + 20} fontSize="10" fill="#a3a3a3" textAnchor="middle">
+            <text key={`fret-num-${i}`} x={i === 0 ? startX - 10 : startX + (i - 0.5) * fretSpacing} y={startY + 5 * stringSpacing + 20} fontSize="10" fill="#64748b" textAnchor="middle">
               {i}
             </text>
           ))}
@@ -327,14 +492,15 @@ const ScaleDiagram: React.FC<{ title: string, scaleNotes: string[], rootNote: st
               const y = startY + sIdx * stringSpacing;
 
               if (!inShape) {
+                if (hideFaintNotes) return null;
                 return (
-                  <circle key={`note-${sIdx}-${fIdx}`} cx={x} cy={y} r="4" fill={isRoot ? "rgba(234, 88, 12, 0.4)" : "rgba(163, 163, 163, 0.3)"} />
+                  <circle key={`note-${sIdx}-${fIdx}`} cx={x} cy={y} r="4" fill={isRoot ? "rgba(59, 130, 246, 0.4)" : "rgba(100, 116, 139, 0.3)"} />
                 );
               }
 
               return (
                 <g key={`note-${sIdx}-${fIdx}`}>
-                  <circle cx={x} cy={y} r="9" fill={isRoot ? "#ea580c" : "#171717"} />
+                  <circle cx={x} cy={y} r="9" fill={isRoot ? "#3b82f6" : "#475569"} />
                   <text x={x} y={y + 1} fontSize="8" fontWeight="bold" fill="white" textAnchor="middle" dominantBaseline="central">
                     {noteName}
                   </text>
@@ -396,26 +562,26 @@ export default function App() {
   const displayKey = scaleNotes[0];
 
   return (
-    <div className="min-h-screen bg-neutral-50 text-neutral-900 p-4 sm:p-8 font-sans relative">
+    <div className="min-h-screen bg-slate-50 text-slate-900 p-4 sm:p-8 font-sans relative">
       <a 
-        href="https://github.com/altf2o/guitar-theory-explorer" 
+        href="https://github.com/altf2o/guitar-theory-explorer"
         target="_blank" 
         rel="noopener noreferrer" 
-        className="absolute top-4 right-4 sm:top-8 sm:right-8 p-2 text-neutral-400 hover:text-neutral-900 transition-colors"
+        className="absolute top-4 right-4 sm:top-8 sm:right-8 p-2 text-slate-400 hover:text-slate-900 transition-colors"
       >
         <Github size={24} />
       </a>
       <div className="max-w-5xl mx-auto space-y-8">
         <header className="text-center space-y-2 pt-4">
           <h1 className="text-3xl font-semibold tracking-tight">Guitar Theory Explorer</h1>
-          <p className="text-neutral-500">Select a key and scale to explore its notes and chords.</p>
+          <p className="text-slate-500">Select a key and scale to explore its notes and chords.</p>
         </header>
 
         {/* Controls */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
           <div className="flex flex-col gap-6">
             <div className="w-full">
-              <div className="text-sm font-medium text-neutral-500 mb-2 px-1">Key</div>
+              <div className="text-sm font-medium text-slate-500 mb-2 px-1">Key</div>
               <div className="grid grid-cols-6 md:grid-cols-12 gap-2">
                 {KEYS.map(k => (
                   <button
@@ -423,8 +589,8 @@ export default function App() {
                     onClick={() => setSelectedKey(k)}
                     className={`py-2 rounded-xl text-sm font-medium transition-all duration-200 ${
                       selectedKey === k 
-                        ? 'bg-neutral-900 text-white shadow-md scale-105' 
-                        : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                        ? 'bg-blue-600 text-white shadow-md scale-105' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
                     {k}
@@ -433,8 +599,8 @@ export default function App() {
               </div>
             </div>
             
-            <div className="w-full border-t border-neutral-100 pt-4">
-              <div className="text-sm font-medium text-neutral-500 mb-2 px-1">Scale / Mode</div>
+            <div className="w-full border-t border-slate-100 pt-4">
+              <div className="text-sm font-medium text-slate-500 mb-2 px-1">Scale / Mode</div>
               <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
                 {MODES.map(mode => (
                   <button
@@ -442,8 +608,8 @@ export default function App() {
                     onClick={() => setSelectedMode(mode.shift)}
                     className={`py-2 px-3 rounded-xl text-sm font-medium transition-all duration-200 ${
                       selectedMode === mode.shift 
-                        ? 'bg-neutral-900 text-white shadow-md scale-105' 
-                        : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                        ? 'bg-blue-600 text-white shadow-md scale-105' 
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                     }`}
                   >
                     {mode.name}
@@ -462,38 +628,38 @@ export default function App() {
           transition={{ duration: 0.3 }}
           className="space-y-8"
         >
-          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 overflow-hidden">
             <h2 className="text-xl font-semibold mb-6">{displayKey} {currentMode.name}</h2>
             
             <div className="overflow-x-auto pb-4">
               <table className="w-full text-center min-w-[600px]">
                 <thead>
-                  <tr className="text-neutral-400 text-xs uppercase tracking-wider">
+                  <tr className="text-slate-400 text-xs uppercase tracking-wider">
                     <th className="pb-4 font-medium text-left pl-4">Degree</th>
                     {currentNumerals.map((rn, i) => <th key={i} className="pb-4 font-medium">{rn}</th>)}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-neutral-100">
+                <tbody className="divide-y divide-slate-100">
                   <tr>
-                    <td className="py-4 text-sm text-neutral-500 font-medium text-left pl-4">Note</td>
+                    <td className="py-4 text-sm text-slate-500 font-medium text-left pl-4">Note</td>
                     {scaleNotes.map((note, i) => (
                       <td key={i} className="py-4 text-lg font-semibold">{note}</td>
                     ))}
                   </tr>
                   <tr>
-                    <td className="py-4 text-sm text-neutral-500 font-medium text-left pl-4">Interval to Next</td>
+                    <td className="py-4 text-sm text-slate-500 font-medium text-left pl-4">Interval to Next</td>
                     {currentSteps.map((step, i) => (
                       <td key={i} className="py-4">
-                        <span className="inline-block px-3 py-1 text-xs font-mono font-medium text-neutral-500 bg-neutral-100 rounded-md">
+                        <span className="inline-block px-3 py-1 text-xs font-mono font-medium text-slate-500 bg-slate-100 rounded-md">
                           {step}
                         </span>
                       </td>
                     ))}
                   </tr>
                   <tr>
-                    <td className="py-4 text-sm text-neutral-500 font-medium text-left pl-4">Quality</td>
+                    <td className="py-4 text-sm text-slate-500 font-medium text-left pl-4">Quality</td>
                     {currentQualities.map((q, i) => (
-                      <td key={i} className="py-4 text-sm text-neutral-600">{q}</td>
+                      <td key={i} className="py-4 text-sm text-slate-600">{q}</td>
                     ))}
                   </tr>
                 </tbody>
@@ -511,16 +677,16 @@ export default function App() {
                 const voicings = getChordVoicings(note, quality);
                 
                 return (
-                  <div key={i} className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 flex flex-col md:flex-row items-center md:items-start gap-8 hover:shadow-md transition-shadow">
+                  <div key={i} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col md:flex-row items-center md:items-start gap-8 hover:shadow-md transition-shadow">
                     <div className="text-center md:text-left md:w-32 shrink-0 md:pt-4">
-                      <div className="text-sm text-neutral-400 font-medium mb-1">{currentNumerals[i]}</div>
+                      <div className="text-sm text-slate-400 font-medium mb-1">{currentNumerals[i]}</div>
                       <div className="text-2xl font-semibold">{chordName}</div>
                     </div>
                     <div className="flex flex-wrap gap-8 justify-center md:justify-start">
                       {voicings.map((frets, vIndex) => (
                         <div key={vIndex} className="flex flex-col items-center">
-                          <ChordDiagram name={chordName} frets={frets} scaleNotes={scaleNotes} />
-                          <span className="text-xs text-neutral-400 mt-3 font-medium bg-neutral-50 px-2 py-1 rounded-md">
+                          <ChordDiagram name={chordName} frets={frets} scaleNotes={scaleNotes} rootNote={note} />
+                          <span className="text-xs text-slate-400 mt-3 font-medium bg-slate-50 px-2 py-1 rounded-md">
                             {vIndex === 0 && frets.some(f => f === 0) ? 'Open Position' : `Shape ${vIndex + 1}`}
                           </span>
                         </div>
@@ -542,16 +708,16 @@ export default function App() {
                 const voicings = getPowerChords(note, quality);
                 
                 return (
-                  <div key={`pwr-${i}`} className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 flex flex-col md:flex-row items-center md:items-start gap-8 hover:shadow-md transition-shadow">
+                  <div key={`pwr-${i}`} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex flex-col md:flex-row items-center md:items-start gap-8 hover:shadow-md transition-shadow">
                     <div className="text-center md:text-left md:w-32 shrink-0 md:pt-4">
-                      <div className="text-sm text-neutral-400 font-medium mb-1">{currentNumerals[i]}5</div>
+                      <div className="text-sm text-slate-400 font-medium mb-1">{currentNumerals[i]}5</div>
                       <div className="text-2xl font-semibold">{chordName}</div>
                     </div>
                     <div className="flex flex-wrap gap-8 justify-center md:justify-start">
                       {voicings.map((frets, vIndex) => (
                         <div key={vIndex} className="flex flex-col items-center">
-                          <ChordDiagram name={chordName} frets={frets} scaleNotes={scaleNotes} />
-                          <span className="text-xs text-neutral-400 mt-3 font-medium bg-neutral-50 px-2 py-1 rounded-md">
+                          <ChordDiagram name={chordName} frets={frets} scaleNotes={scaleNotes} rootNote={note} />
+                          <span className="text-xs text-slate-400 mt-3 font-medium bg-slate-50 px-2 py-1 rounded-md">
                             Position {vIndex + 1}
                           </span>
                         </div>
@@ -566,7 +732,7 @@ export default function App() {
           {/* CAGED Scale Shapes */}
           <div className="pt-12">
             <h3 className="text-2xl font-semibold mb-2 px-2">CAGED Scale Shapes</h3>
-            <p className="text-sm text-neutral-500 mb-6 px-2">
+            <p className="text-sm text-slate-500 mb-6 px-2">
               The 5 positions cover the entire fretboard. The root note ({scaleNotes[0]}) is highlighted in orange.
             </p>
             <div className="flex flex-col gap-6 px-2">
@@ -577,6 +743,7 @@ export default function App() {
                   scaleNotes={scaleNotes} 
                   rootNote={scaleNotes[0]} 
                   baseFret={shape.baseFret} 
+                  hideFaintNotes
                 />
               ))}
             </div>
@@ -585,7 +752,7 @@ export default function App() {
           {/* Full Fretboard Scale */}
           <div className="pt-12">
             <h3 className="text-2xl font-semibold mb-2 px-2">Full Fretboard</h3>
-            <p className="text-sm text-neutral-500 mb-6 px-2">
+            <p className="text-sm text-slate-500 mb-6 px-2">
               All notes of the {displayKey} {currentMode.name} scale across the entire fretboard.
             </p>
             <div className="px-2">
@@ -598,14 +765,29 @@ export default function App() {
             </div>
           </div>
 
+          {/* Pentatonic Options */}
+          <div className="pt-12">
+            <h3 className="text-2xl font-semibold mb-2 px-2">Pentatonic</h3>
+            <p className="text-sm text-slate-500 mb-6 px-2">
+              The 5 pentatonic patterns mapped across the fretboard. The Major and relative Minor pentatonic share the exact same shapes!
+            </p>
+            <div className="px-2">
+              <PentatonicDiagram 
+                title={`${displayKey} ${currentQualities[0] === 'Major' ? 'Major ' : 'Minor '}Pentatonic (All 5 Patterns)`}
+                scaleNotes={scaleNotes} 
+                selectedMode={selectedMode}
+              />
+            </div>
+          </div>
+
           {/* Progressions */}
           <div className="pt-12">
             <h3 className="text-2xl font-semibold mb-6 px-2">Popular Progressions</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {PROGRESSIONS.map((prog, i) => (
-                <div key={i} className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 hover:shadow-md transition-shadow">
+                <div key={i} className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 hover:shadow-md transition-shadow">
                   <h4 className="text-lg font-semibold mb-2">{prog.name}</h4>
-                  <p className="text-sm text-neutral-500 mb-6">{prog.feel}</p>
+                  <p className="text-sm text-slate-500 mb-6">{prog.feel}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     {prog.degrees.map((deg, j) => {
                       const note = scaleNotes[deg];
@@ -614,12 +796,12 @@ export default function App() {
                       const numeral = currentNumerals[deg];
                       return (
                         <React.Fragment key={j}>
-                          <div className="bg-neutral-50 px-4 py-3 rounded-xl border border-neutral-200 flex flex-col items-center min-w-[70px]">
-                            <span className="text-xs text-neutral-400 font-medium mb-1">{numeral}</span>
-                            <span className="font-semibold text-neutral-800">{chordName}</span>
+                          <div className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-200 flex flex-col items-center min-w-[70px]">
+                            <span className="text-xs text-slate-400 font-medium mb-1">{numeral}</span>
+                            <span className="font-semibold text-slate-800">{chordName}</span>
                           </div>
                           {j < prog.degrees.length - 1 && (
-                            <span className="text-neutral-300 font-bold">→</span>
+                            <span className="text-slate-300 font-bold">→</span>
                           )}
                         </React.Fragment>
                       );
